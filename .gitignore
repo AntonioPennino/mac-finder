@@ -1,0 +1,12 @@
+# Ambiente virtuale Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# File generati localmente (vengono salvati nel repo da GitHub Actions)
+# seen_urls.json e risultati_mac_mini.txt vengono committati dal bot,
+# ma puoi ignorarli in locale se preferisci
+# risultati_mac_mini.txt
+# seen_urls.json

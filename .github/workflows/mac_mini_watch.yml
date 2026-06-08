@@ -1,0 +1,47 @@
+name: 🍎 Mac Mini Finder Watch
+
+on:
+  schedule:
+    # Ogni 4 ore (UTC): 00:00, 04:00, 08:00, 12:00, 16:00, 20:00
+    - cron: '0 */4 * * *'
+  workflow_dispatch:  # permette di lanciarlo manualmente dalla UI di GitHub
+
+jobs:
+  find-mac-mini:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: write  # necessario per fare il commit di seen_urls.json
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🐍 Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: 🔍 Run Mac Mini Finder
+        env:
+          EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO:       ${{ secrets.EMAIL_TO }}
+        run: python mac_mini_finder.py
+
+      - name: 💾 Salva seen_urls.json e risultati nel repo
+        run: |
+          git config --global user.name  "Mac Mini Bot 🤖"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add seen_urls.json risultati_mac_mini.txt 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "🤖 Update seen URLs — $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
