@@ -257,6 +257,94 @@ def applica_filtri(titolo: str, location: str = "") -> bool:
     return True
 
 
+def controlla_descrizione(context, url: str, platform: str) -> str:
+    """
+    Visita la pagina del singolo annuncio e ritorna il testo della descrizione.
+    Viene chiamata solo per annunci con chip non confermato dal titolo.
+    """
+    page = context.new_page()
+    try:
+        page.goto(url, timeout=30000)
+        page.wait_for_load_state("domcontentloaded")
+        human_delay(1.5, 2.5)
+
+        # Selettori specifici per piattaforma (dal più specifico al più generico)
+        selectors_map = {
+            "Vinted":   ["[class*='ItemDescription']", "[itemprop='description']",
+                         "[class*='description']", "[data-testid*='description']"],
+            "Wallapop": ["[class*='description']", "[class*='item-detail']",
+                         "p[class*='card']"],
+            "Subito":   ["[class*='PostingBody']", "[class*='body-text']",
+                         "[class*='description']", "section article"],
+            "eBay":     ["[class*='d-item-description']", "#desc_div",
+                         "[class*='description']"],
+        }
+        for selector in selectors_map.get(platform, ["[class*='description']"]):
+            try:
+                elem = page.query_selector(selector)
+                if elem:
+                    testo = elem.inner_text().strip()
+                    if len(testo) > 15:
+                        return testo
+            except:
+                continue
+
+        # Fallback: prende i primi 3000 caratteri del body
+        body = page.query_selector("body")
+        return body.inner_text()[:3000] if body else ""
+
+    except Exception:
+        return ""
+    finally:
+        page.close()
+
+
+def arricchisci_da_descrizione(
+    context, url: str, platform: str,
+    ram_ok: bool, storage_ok: bool, manca: list
+) -> tuple:
+    """
+    Visita la pagina, legge la descrizione e:
+    - Ritorna (None, None, None) se la descrizione rivela chip/RAM/storage sbagliati
+    - Ritorna (ram_ok, storage_ok, manca) aggiornati con le info trovate
+    """
+    desc = controlla_descrizione(context, url, platform)
+    if not desc:
+        return ram_ok, storage_ok, manca
+
+    # Scarta se la descrizione rivela chip/RAM/storage sbagliati
+    if is_wrong_chip(desc):
+        print(f"    ⛔ Scartato (Intel/M2 trovato nella descrizione)")
+        return None, None, None
+    if is_wrong_ram(desc):
+        print(f"    ⛔ Scartato (8GB trovati nella descrizione)")
+        return None, None, None
+    if is_wrong_storage(desc):
+        print(f"    ⛔ Scartato (256GB trovati nella descrizione)")
+        return None, None, None
+    if is_broken(desc):
+        print(f"    ⛔ Scartato (rotto nella descrizione)")
+        return None, None, None
+
+    # Aggiorna info dalla descrizione
+    desc_lower = desc.lower()
+    manca = list(manca)  # copia
+    if "m1" in desc_lower and "conferma chip M1" in manca:
+        manca.remove("conferma chip M1")
+    if any(x in desc_lower for x in ["2020", "2021", "mneh3", "mgnr3"]) and "anno/modello esatto" in manca:
+        manca.remove("anno/modello esatto")
+    if check_ram_ok(desc) and not ram_ok:
+        ram_ok = True
+        if "conferma 16GB RAM" in manca:
+            manca.remove("conferma 16GB RAM")
+    if check_storage_ok(desc) and not storage_ok:
+        storage_ok = True
+        if "conferma 512GB storage" in manca:
+            manca.remove("conferma 512GB storage")
+
+    return ram_ok, storage_ok, manca
+
+
 # ─── VINTED ─────────────────────────────────────────────────────────────────
 
 def cerca_vinted(context) -> List[Offerta]:
@@ -312,6 +400,15 @@ def cerca_vinted(context) -> List[Offerta]:
                 ram_ok = check_ram_ok(testo)
                 storage_ok = check_storage_ok(testo)
                 manca = info_mancanti(titolo)
+
+                # Visita la pagina se chip/RAM/storage non sono confermati dal titolo
+                if "conferma chip M1" in manca or "conferma 16GB RAM" in manca or "conferma 512GB storage" in manca:
+                    print(f"    🔎 Leggo descrizione Vinted: {titolo[:50]}...")
+                    ram_ok, storage_ok, manca = arricchisci_da_descrizione(
+                        context, url, "Vinted", ram_ok, storage_ok, manca
+                    )
+                    if ram_ok is None:  # scartato dalla descrizione
+                        continue
 
                 offerte.append(Offerta(titolo, prezzo, "Vinted", url, ram_ok, storage_ok, manca, location))
             except:
@@ -381,6 +478,15 @@ def cerca_wallapop(context) -> List[Offerta]:
                 storage_ok = check_storage_ok(testo)
                 manca = info_mancanti(titolo)
 
+                # Visita la pagina se chip/RAM/storage non sono confermati dal titolo
+                if "conferma chip M1" in manca or "conferma 16GB RAM" in manca or "conferma 512GB storage" in manca:
+                    print(f"    🔎 Leggo descrizione Wallapop: {titolo[:50]}...")
+                    ram_ok, storage_ok, manca = arricchisci_da_descrizione(
+                        context, url, "Wallapop", ram_ok, storage_ok, manca
+                    )
+                    if ram_ok is None:
+                        continue
+
                 offerte.append(Offerta(titolo, prezzo, "Wallapop", url, ram_ok, storage_ok, manca, location))
             except:
                 continue
@@ -449,6 +555,15 @@ def cerca_subito(context) -> List[Offerta]:
                 ram_ok = check_ram_ok(testo)
                 storage_ok = check_storage_ok(testo)
                 manca = info_mancanti(titolo)
+
+                # Visita la pagina se chip/RAM/storage non sono confermati dal titolo
+                if "conferma chip M1" in manca or "conferma 16GB RAM" in manca or "conferma 512GB storage" in manca:
+                    print(f"    🔎 Leggo descrizione Subito: {titolo[:50]}...")
+                    ram_ok, storage_ok, manca = arricchisci_da_descrizione(
+                        context, url, "Subito", ram_ok, storage_ok, manca
+                    )
+                    if ram_ok is None:
+                        continue
 
                 offerte.append(Offerta(titolo, prezzo, "Subito", url, ram_ok, storage_ok, manca, location))
             except:
@@ -527,6 +642,15 @@ def cerca_ebay(context) -> List[Offerta]:
                 ram_ok = check_ram_ok(testo)
                 storage_ok = check_storage_ok(testo)
                 manca = info_mancanti(titolo)
+
+                # Visita la pagina se chip/RAM/storage non sono confermati dal titolo
+                if "conferma chip M1" in manca or "conferma 16GB RAM" in manca or "conferma 512GB storage" in manca:
+                    print(f"    🔎 Leggo descrizione eBay: {titolo[:50]}...")
+                    ram_ok, storage_ok, manca = arricchisci_da_descrizione(
+                        context, url, "eBay", ram_ok, storage_ok, manca
+                    )
+                    if ram_ok is None:
+                        continue
 
                 offerte.append(Offerta(titolo, prezzo, "eBay", url, ram_ok, storage_ok, manca, location))
             except:
